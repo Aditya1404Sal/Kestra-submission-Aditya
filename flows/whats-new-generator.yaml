@@ -1,0 +1,74 @@
+id: whats-new-generator-2
+namespace: my.project
+description: |
+  Daily flow to auto-generate a "What's New" section in the documentation by summarizing the latest commits on the `main` branch.
+  This ensures that users and contributors can quickly view the recent changes without waiting for a formal release.
+
+triggers:
+  - id: daily-trigger
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 * * *"  # Runs daily at 9 AM UTC
+
+tasks:
+  - id: working-directory
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    outputFiles:
+      - "commits.txt"
+      - "summary.txt"
+    tasks:
+      - id: clone-repo
+        type: io.kestra.plugin.git.Clone
+        url: https://github.com/Aditya1404Sal/VulcanGuard
+        branch: main
+        username: Aditya1404Sal
+        password: "{{ secret('GITHUB_TOKEN') }}"
+
+      - id: fetch-yesterday-log
+        type: io.kestra.plugin.scripts.shell.Commands
+        taskRunner:
+          type: io.kestra.plugin.core.runner.Process
+        commands:
+          - git fetch origin main
+          - YESTERDAY=$(date -d "yesterday" +"%Y-%m-%d")
+          - TODAY=$(date +"%Y-%m-%d")
+          - echo "Fetching commits from $YESTERDAY to $TODAY"
+          - git log --since="$YESTERDAY" --until="$TODAY" --pretty=format:"%h %s" > commits.txt
+          - touch commits.txt  # Ensure file exists even if empty
+          - echo "Commits saved to commits.txt"
+
+  - id: summarize-with-llm
+    type: io.kestra.plugin.openai.ChatCompletion
+    apiKey: "{{ secret('OPENAI_API_KEY') }}"
+    model: gpt-3.5-turbo
+    temperature: 0.5
+    messages:
+      - role: system
+        content: "You are a technical writer creating release notes. Summarize git commits into clear, user-friendly release notes."
+      - role: user
+        content: |
+          Summarize the following git commits into a clear and concise "What's New" release note for users:
+
+          {{ read(outputs['working-directory'].outputFiles['commits.txt']) }}
+
+  - id: save-summary
+    type: io.kestra.plugin.scripts.shell.Commands
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    commands:
+      - echo "{{ outputs['summarize-with-llm'].choices[0].message.content }}" > summary.txt
+
+  - id: update-docs
+    type: io.kestra.plugin.scripts.shell.Commands
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    commands:
+      - cd repo/docs
+      - echo -e "\n### $(date +"%Y-%m-%d")" >> whats-new.md
+      - cat ../../summary.txt >> whats-new.md
+      - echo "" >> whats-new.md
+      - cd ../..
+      - git config user.email "bot@yourorg.com"
+      - git config user.name "AutoDocs Bot"
+      - git add repo/docs/whats-new.md
+      - "git commit -m \\\"docs: update What's New section for $(date +\\\"%Y-%m-%d\\\")\\\""
+      - git push origin main
