@@ -18,9 +18,9 @@ tasks:
     tasks:
       - id: clone-repo
         type: io.kestra.plugin.git.Clone
-        url: https://github.com/Aditya1404Sal/VulcanGuard
+        url: https://github.com/YourGithub/Repo
         branch: main
-        username: Aditya1404Sal
+        username: YourGithubUsername
         password: "{{ secret('GITHUB_TOKEN') }}"
 
       - id: fetch-yesterday-log
